@@ -1,6 +1,5 @@
-# test/Test_pmd.jl
-include(joinpath(@__DIR__, "..", "src", "BRMB.jl"))
-using .BRMB
+
+using BigRiverSchneider
 using LinearAlgebra, Statistics, Random
 Random.seed!(123456)
 
@@ -16,7 +15,7 @@ println("X is $n × $p\n")
 
 # TEST 1 — correctness: at c = √p there's no sparsity, so the first sparse
 # loading must equal the ordinary top PC (paper eq. 2.10), up to sign.
-m_sp  = BRMB.pmd(X; k = 1, c = sqrt(p))
+m_sp  = BigRiverSchneider.pmd(X; k = 1, c = sqrt(p))
 v_sp  = m_sp.loadings[:, 1]
 v_ord = svd(X .- mean(X, dims = 1)).V[:, 1]
 println("TEST 1  |⟨v_ordinary, v_sparse⟩| = ",
@@ -25,13 +24,13 @@ println("TEST 1  |⟨v_ordinary, v_sparse⟩| = ",
 # TEST 2 — sparsity appears as c shrinks
 println("TEST 2  smaller c ⇒ fewer nonzero loadings")
 for c in (sqrt(p), 4.0, 2.0, 1.2)    # as c decreases, we expect the number of nonzero loadings to decrease, showing that the solution is becoming sparser; this is a key property of the PMD method, where c controls the sparsity level of the solution.
-    local m = BRMB.pmd(X; k = 1, c = c)
+    local m = BigRiverSchneider.pmd(X; k = 1, c = c)
     println("  c = $(round(c, digits = 2))  →  ",
             count(!iszero, m.loadings[:, 1]), " / $p features used")
 end
 
 # TEST 3 — multiple components, shapes
-m3 = BRMB.pmd(X; k = 4, c = 2.0)
+m3 = BigRiverSchneider.pmd(X; k = 4, c = 2.0)
 println("\nTEST 3  k=4, c=2.0")
 println("  loadings size     : ", size(m3.loadings))
 println("  nonzeros / column : ", [count(!iszero, m3.loadings[:, j]) for j in 1:4])
@@ -43,7 +42,7 @@ println("  nonzeros / column : ", [count(!iszero, m3.loadings[:, j]) for j in 1:
 # the resulting score correlations will be close to zero, indicating that the components are indeed capturing distinct sources of variation in the data.
 
 
-mort = BRMB.pmd_orth(X; k = 4, c = 2.0)
+mort = BigRiverSchneider.pmd_orth(X; k = 4, c = 2.0)
 println("loadings size : ", size(mort.loadings))
 println("nonzeros/col  : ", [count(!iszero, mort.loadings[:, j]) for j in 1:4])
 

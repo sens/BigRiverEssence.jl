@@ -1,6 +1,5 @@
-include(joinpath(@__DIR__, "..", "src", "BRMB.jl")) # this finds src/BRMB.jl, which in turn includes src/pca.jl, so all the code is now available in this test file.
 
-using BigRiverSchneider   # this makes the exported names from BRMB.jl available in this test file, so we can call pca, pca_transform, etc. directly without prefixing with BRMB.
+using BigRiverSchneider   # this makes the exported names from BigRiverSchneider.jl available in this test file, so we can call pca, pca_transform, etc. directly without prefixing with BigRiverSchneider.
 
 using Random, LinearAlgebra # we need Random for seeding the random number generator, and LinearAlgebra for matrix operations in the test code.
 Random.seed!(1234) 
