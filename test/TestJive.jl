@@ -1,10 +1,9 @@
 # test/TestJive.jl
-# Validity checks for jive — self-contained, validates against the
-# generative model (supplement §6.2) and the decomposition's defining properties.
 
-using BigRiverSchneider
+using BigRiverSchneider, RCall, BenchmarkTools
 using LinearAlgebra, Statistics, Random
 Random.seed!(1234)
+
 
 # ---------------------------------------------------------------------------
 # Build data with KNOWN joint + individual structure (supplement §6.2 generative model):
@@ -83,3 +82,85 @@ Qest  = Matrix(qr(Sest').Q)[:, 1:r]
 canon = svd(Qtrue' * Qest).S            # canonical correlations between the two joint subspaces
 println("TEST 5  joint subspace recovery")
 println("  canonical correlations: ", round.(canon, digits = 6), "   (want all ≈ 1.0)")
+
+
+
+
+# test/CompareJive.jl — JIVE: our vs r.jive vs ground truth, + benchmark.
+
+#  data with KNOWN joint + individual structure, noiseless (ground truth) 
+n = 100; r, r1, r2 = 2, 3, 3; p1, p2 = 40, 30
+S  = randn(r, n)                          # shared joint scores (the TRUTH)
+U1 = randn(p1, r); U2 = randn(p2, r)
+S1 = randn(r1, n); W1 = randn(p1, r1)
+S2 = randn(r2, n); W2 = randn(p2, r2)
+X1 = U1*S + W1*S1
+X2 = U2*S + W2*S2
+Xc1 = X1 .- mean(X1, dims = 2)            # centered (what both methods decompose)
+Xc2 = X2 .- mean(X2, dims = 2)
+
+#  fit our jive 
+res = jive([X1, X2], r, [r1, r2]; standardize = false)
+
+#  fit r.jive on the same data, same given ranks 
+@rput X1 X2 r r1 r2
+R"""
+library(r.jive)
+fit <- jive(list(X1, X2), rankJ = r, rankA = c(r1, r2),
+            method = "given", scale = FALSE, center = TRUE, showProgress = FALSE)
+J1r <- fit$joint[[1]];      J2r <- fit$joint[[2]]
+A1r <- fit$individual[[1]]; A2r <- fit$individual[[2]]
+d1  <- fit$data[[1]];       d2  <- fit$data[[2]]      # r.jive's CENTERED data
+"""
+@rget J1r J2r A1r A2r d1 d2
+
+# helper: fraction of variance reconstructed (1.0 = perfect)
+varfrac(data, recon) = 1 - norm(data .- recon)^2 / norm(data)^2
+# helper: joint-subspace basis from a stacked joint matrix
+jbasis(Jblocks...) = Matrix(qr(svd(vcat(Jblocks...)).Vt[1:r, :]').Q)[:, 1:r]
+
+println("="^60)
+println("JIVE VALIDATION:  yours  vs  r.jive  vs  ground truth")
+println("="^60)
+
+# ---- 1. GROUND TRUTH: does each recover the noiseless data exactly? ----
+println("\n[1] Reconstruction of data (fraction of variance, want 1.0)")
+println("  yours  D1: ", round(varfrac(Xc1, res.J[1].+res.A[1]), digits=6),
+        "   D2: ", round(varfrac(Xc2, res.J[2].+res.A[2]), digits=6))
+println("  r.jive D1: ", round(varfrac(d1, J1r.+A1r), digits=6),
+        "   D2: ", round(varfrac(d2, J2r.+A2r), digits=6))
+
+# sanity: r.jive's centered data must equal ours (same input)
+println("  (input check: ‖r.jive data − your centered‖² = ",
+        round(norm(d1 .- Xc1)^2 + norm(d2 .- Xc2)^2, digits=10), ", want 0)")
+
+# ---- 2. JOINT SUBSPACE: the well-determined, convention-robust comparison ----
+Strue = S .- mean(S, dims=2)
+Qtrue = Matrix(qr(Strue').Q)[:, 1:r]
+Qmine = jbasis(res.J[1], res.J[2])
+Qrjv  = jbasis(J1r, J2r)
+println("\n[2] Joint subspace alignment (canonical correlations, want ≈1)")
+println("  yours  vs ground truth : ", round.(svd(Qmine' * Qtrue).S, digits=6))
+println("  r.jive vs ground truth : ", round.(svd(Qrjv'  * Qtrue).S, digits=6))
+println("  yours  vs r.jive       : ", round.(svd(Qmine' * Qrjv ).S, digits=6))
+
+# ---- 3. ORTHOGONALITY: the defining JIVE property (ours) ----
+Jm = vcat(res.J[1], res.J[2])
+println("\n[3] Orthogonality  J·Aᵢᵀ = 0  (ours, want ≈0)")
+println("  ‖J·A₁ᵀ‖ = ", round(norm(Jm*res.A[1]'), digits=8),
+        "   ‖J·A₂ᵀ‖ = ", round(norm(Jm*res.A[2]'), digits=8))
+
+# ---- 4. BENCHMARK ----
+println("\n[4] Timing")
+print("  yours (Julia) : ")
+@btime jive([$X1, $X2], $r, [$r1, $r2]; standardize=false);
+R"""
+library(microbenchmark)
+mb <- microbenchmark(
+  jive(list(X1, X2), rankJ=r, rankA=c(r1,r2),
+       method="given", scale=FALSE, center=TRUE, showProgress=FALSE),
+  times = 20)
+cat("  r.jive (R)    :  median", round(median(mb$time)/1e6, 2), "ms\n")
+"""
+
+
