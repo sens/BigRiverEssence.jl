@@ -258,3 +258,77 @@ function jive_fast(Xs::Vector{<:AbstractMatrix}, r::Int, ri::Vector{Int};
 
     return JiveResult{T_}(J, A, S, U, Si, Wi, r, ri)
 end
+
+
+
+
+# test/TestJiveFast.jl
+# Validate jive_fast (SVD-reduction, supplement §4) against the reference jive().
+# The supplement guarantees IDENTICAL results — so they must match to machine precision.
+
+using BigRiverSchneider, BenchmarkTools
+using LinearAlgebra, Statistics, Random
+Random.seed!(1234)
+
+# helper: compare two JiveResults on the well-determined quantities
+function compare_results(a, b)
+    jdiff = sum(norm(a.J[i] .- b.J[i]) for i in eachindex(a.J))
+    adiff = sum(norm(a.A[i] .- b.A[i]) for i in eachindex(a.A))
+    return jdiff, adiff
+end
+
+println("="^60)
+println("jive_fast  vs  jive   (must be identical — supplement §4)")
+println("="^60)
+
+# ---------------------------------------------------------------------------
+# CASE 1 — TALL data (pᵢ < n). Reduction does nothing here, but results must
+# still match. This checks correctness of the map-back machinery.
+# ---------------------------------------------------------------------------
+n = 100; r, r1, r2 = 2, 3, 3
+S = randn(r, n); U1 = randn(40, r); U2 = randn(30, r)
+S1 = randn(r1, n); W1 = randn(40, r1)
+S2 = randn(r2, n); W2 = randn(30, r2)
+X1t = U1*S + W1*S1
+X2t = U2*S + W2*S2
+
+slow_t = jive(     [X1t, X2t], r, [r1, r2]; standardize = false)
+fast_t = jive_fast([X1t, X2t], r, [r1, r2]; standardize = false)
+jd, ad = compare_results(slow_t, fast_t)
+println("\n[CASE 1: tall data 40×100, 30×100]")
+println("  ‖J_slow − J_fast‖ : ", round(jd, digits = 12))
+println("  ‖A_slow − A_fast‖ : ", round(ad, digits = 12), "   (want ≈ 0)")
+
+# ---------------------------------------------------------------------------
+# CASE 2 — WIDE data (pᵢ ≫ n). This is where §4 actually compresses and speeds up.
+# Build wide datasets with known low-rank joint+individual structure.
+# ---------------------------------------------------------------------------
+nw = 80; rw, rw1, rw2 = 2, 3, 3
+p1w, p2w = 3000, 2000                       # MANY more variables than samples
+Sw  = randn(rw, nw)
+U1w = randn(p1w, rw); U2w = randn(p2w, rw)
+S1w = randn(rw1, nw); W1w = randn(p1w, rw1)
+S2w = randn(rw2, nw); W2w = randn(p2w, rw2)
+X1w = U1w*Sw + W1w*S1w
+X2w = U2w*Sw + W2w*S2w
+
+slow_w = jive(     [X1w, X2w], rw, [rw1, rw2]; standardize = false)
+fast_w = jive_fast([X1w, X2w], rw, [rw1, rw2]; standardize = false)
+jd_w, ad_w = compare_results(slow_w, fast_w)
+println("\n[CASE 2: wide data 3000×80, 2000×80]")
+println("  ‖J_slow − J_fast‖ : ", round(jd_w, digits = 10))
+println("  ‖A_slow − A_fast‖ : ", round(ad_w, digits = 10), "   (want ≈ 0)")
+
+# also confirm fast version recovers ground truth exactly (noiseless)
+Xc1w = X1w .- mean(X1w, dims = 2); Xc2w = X2w .- mean(X2w, dims = 2)
+recon_fast = norm(Xc1w .- (fast_w.J[1].+fast_w.A[1]))^2 + norm(Xc2w .- (fast_w.J[2].+fast_w.A[2]))^2
+println("  jive_fast vs ground truth ‖X−(J+A)‖² : ", round(recon_fast, digits = 10), "   (want ≈ 0)")
+
+# ---------------------------------------------------------------------------
+# TIMING — on the WIDE data, where the reduction should win.
+# ---------------------------------------------------------------------------
+println("\n[TIMING on wide data 3000×80, 2000×80]")
+print("  jive (full)  : ")
+@btime jive(     [$X1w, $X2w], $rw, [$rw1, $rw2]; standardize = false);
+print("  jive_fast    : ")
+@btime jive_fast([$X1w, $X2w], $rw, [$rw1, $rw2]; standardize = false);
