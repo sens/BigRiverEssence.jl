@@ -203,3 +203,259 @@ function jive_fast(Xs::Vector{<:AbstractMatrix}, r::Int, ri::Vector{Int};
 
     return JiveResult{T_}(J, A, S, U, Si, Wi, r, ri)
 end
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# Abhisek Banerjee
+# jive_similar — JIVE matching r.jive's CURRENT algorithm (O'Connell & Lock).
+# Same as jive(), but ALSO enforces orthogonality between the individual estimates
+# (not just joint ⊥ individual). The vignette notes r.jive added this constraint:
+# "also enforcing the individual estimates to be orthogonal to each other improves
+#  convergence and robustness." This shifts variance from individual toward joint.
+
+function jive_similar(Xs::Vector{<:AbstractMatrix}, r::Int, ri::Vector{Int};
+                      standardize = true, tol = 1e-10, maxiter = 1000)
+    k = length(Xs)
+    Xs = [Matrix{Float64}(X) for X in Xs]
+    n = size(Xs[1], 2)
+    all(size(X, 2) == n for X in Xs) || throw(ArgumentError("All datasets must share the same number of columns (samples)"))
+    length(ri) == k || throw(ArgumentError("ri must have one rank per dataset (length $k), got length $(length(ri))"))
+    T_ = Float64
+
+    # --- preprocessing (paper §2.1): row-center, scale each block by Frobenius norm ---
+    Xc = Vector{Matrix{T_}}(undef, k)
+    for i in 1:k
+        Xi = Xs[i] .- mean(Xs[i], dims = 2)
+        standardize && (Xi ./= norm(Xi))
+        Xc[i] = Xi
+    end
+
+    pis = [size(X, 1) for X in Xc]
+    stack(blocks) = reduce(vcat, blocks)
+    function rowblocks(M)
+        idx = 1; out = Matrix{T_}[]
+        for pᵢ in pis
+            push!(out, M[idx:idx+pᵢ-1, :]); idx += pᵢ
+        end
+        out
+    end
+
+    # --- initialize ---
+    Xjoint = stack(Xc)
+    A = [zeros(T_, pis[i], n) for i in 1:k]
+    J = [zeros(T_, pis[i], n) for i in 1:k]
+
+    # --- STAGE 1: alternating loop ---
+    prev_norm = Inf
+    for _ in 1:maxiter
+        # STEP 1: joint = rank-r SVD of Xjoint
+        F = svd(Xjoint)
+        Jfull = F.U[:, 1:r] * Diagonal(F.S[1:r]) * F.Vt[1:r, :]
+        J = rowblocks(Jfull)
+        V = F.Vt[1:r, :]'                          # joint row-space basis (n × r)
+
+        # STEP 2: individual structure — now orthogonal to joint AND other individuals
+        for i in 1:k
+            # collect bases to orthogonalize against: joint V + every OTHER individual's row space
+            bases = Matrix{T_}[V]
+            for j in 1:k
+                if j != i && norm(A[j]) > 0        # skip zero (not-yet-estimated) individuals
+                    Vj = svd(A[j]).Vt[1:ri[j], :]' # j-th individual's row space (n × rⱼ)
+                    push!(bases, Vj)
+                end
+            end
+            B  = reduce(hcat, bases)               # combined basis (n × m)
+            Qb = Matrix(qr(B).Q)[:, 1:size(B, 2)]  # orthonormalize the combined basis
+
+            Xindiv = Xc[i] .- J[i]
+            proj   = Xindiv .- (Xindiv * Qb) * Qb' # remove joint AND other individuals
+            Fi = svd(proj)
+            rri = ri[i]
+            A[i] = Fi.U[:, 1:rri] * Diagonal(Fi.S[1:rri]) * Fi.Vt[1:rri, :]
+        end
+
+        # rebuild & check convergence
+        Xjoint = stack([Xc[i] .- A[i] for i in 1:k])
+        R = stack([Xc[i] .- J[i] .- A[i] for i in 1:k])
+        cur = norm(R)
+        abs(prev_norm - cur) < tol && break
+        prev_norm = cur
+    end
+
+    # --- STAGE 2: factorize (same as jive) ---
+    Fj = svd(stack(J))
+    S  = Fj.Vt[1:r, :]
+    Ufull = Fj.U[:, 1:r] * Diagonal(Fj.S[1:r])
+    U = rowblocks(Ufull)
+
+    Si = Matrix{T_}[]; Wi = Matrix{T_}[]
+    for i in 1:k
+        Fi = svd(A[i]); rri = ri[i]
+        push!(Si, Fi.Vt[1:rri, :])
+        push!(Wi, Fi.U[:, 1:rri] * Diagonal(Fi.S[1:rri]))
+    end
+
+    return JiveResult{T_}(J, A, S, U, Si, Wi, r, ri)
+end
+
+
+
+
+
+# Abhisek Banerjee
+# jive_rjive — replicates r.jive's jive(method="given", scale=TRUE, est=TRUE, orthIndiv=TRUE).
+# Matches r.jive's source exactly: scaling = norm(Xi,'fro')*sqrt(sum of all element counts),
+# SVD-reduction before the loop with map-back, and individual⊥individual orthogonality.
+
+function jive_rjive(Xs::Vector{<:AbstractMatrix}, r::Int, ri::Vector{Int};
+                    scale = true, center = true, tol = nothing, maxiter = 1000)
+    k = length(Xs)
+    Xs = [Matrix{Float64}(X) for X in Xs]
+    n = size(Xs[1], 2)
+    all(size(X,2) == n for X in Xs) || throw(ArgumentError("all datasets need the same number of columns"))
+    T_ = Float64
+
+    # element counts per block, and their sum (r.jive's `n` and `sum(n)`)
+    nel = [size(X,1)*size(X,2) for X in Xs]
+    sum_n = sum(nel)
+
+    # --- preprocessing: center by row mean, scale by norm*sqrt(sum_n)  (r.jive's exact formula) ---
+    Xc = Vector{Matrix{T_}}(undef, k)
+    for i in 1:k
+        Xi = center ? Xs[i] .- mean(Xs[i], dims=2) : copy(Xs[i])
+        if scale
+            Xi ./= (norm(Xi) * sqrt(sum_n))        # scaleValues[i] = norm(Xi,'f')*sqrt(sum(n))
+        end
+        Xc[i] = Xi
+    end
+
+    # r.jive's default convergence tol: 1e-6 * ‖stacked data‖_F
+    conv = tol === nothing ? 1e-6 * norm(reduce(vcat, Xc)) : tol
+
+    # --- SVD-reduction (est=TRUE): reduce each block to ΛVᵀ, keep U to map back ---
+    Ubig = Vector{Matrix{T_}}(undef, k)
+    Xr   = Vector{Matrix{T_}}(undef, k)
+    for i in 1:k
+        if size(Xc[i],1) > size(Xc[i],2)           # only reduce when rows > cols (r.jive's condition)
+            F = svd(Xc[i])
+            nc = size(Xc[i], 2)
+            Xr[i] = Diagonal(F.S[1:nc]) * F.Vt[1:nc, :]   # nc × n
+            Ubig[i] = F.U[:, 1:nc]
+        else
+            Xr[i] = Xc[i]
+            Ubig[i] = Matrix{T_}(I, size(Xc[i],1), size(Xc[i],1))
+        end
+    end
+
+    pis = [size(X,1) for X in Xr]
+    stack(b) = reduce(vcat, b)
+    function rowblocks(M)
+        idx=1; out=Matrix{T_}[]
+        for p in pis; push!(out, M[idx:idx+p-1, :]); idx+=p; end
+        out
+    end
+
+    # --- jive.iter on the reduced data ---
+    A = [zeros(T_, pis[i], n) for i in 1:k]
+    J = [zeros(T_, pis[i], n) for i in 1:k]
+    Vind = [zeros(T_, n, ri[i]) for i in 1:k]
+    Xtot = stack(Xr)
+    Jtot = fill(-1.0, size(Xtot)); Atot = fill(-1.0, size(Xtot))
+
+    nrun = 0; converged = false
+    while nrun < maxiter && !converged
+        Jlast = copy(Jtot); Alast = copy(Atot)
+
+        # --- joint: rank-r SVD of (Xtot - Atot) ---
+        if r > 0
+            tmp = Xtot .- Atot
+            s = svd(tmp)
+            Jtot = s.U[:,1:r] * Diagonal(s.S[1:r]) * s.Vt[1:r,:]
+            V = s.Vt[1:r,:]'                       # n × r
+        else
+            Jtot = zeros(T_, size(Xtot)); V = zeros(T_, n, 0)
+        end
+        J = rowblocks(Jtot)
+
+        # --- individual: project away from joint AND other individuals ---
+        for i in 1:k
+            if ri[i] > 0
+                tmp = (Xr[i] .- J[i]) * (I - V*V')             # remove joint
+                if nrun > 0                                    # remove other individuals (orthIndiv)
+                    for j in 1:k
+                        j == i && continue
+                        tmp = tmp * (I - Vind[j]*Vind[j]')
+                    end
+                end
+                s = svd(tmp)
+                Vind[i] = s.Vt[1:ri[i], :]'
+                A[i] = s.U[:,1:ri[i]] * Diagonal(s.S[1:ri[i]]) * s.Vt[1:ri[i],:]
+            else
+                A[i] = zeros(T_, pis[i], n)
+            end
+        end
+
+        # first-iteration special handling (r.jive's nrun==0 block): re-orthogonalize
+        if nrun == 0
+            for i in 1:k, j in 1:k
+                j == i && continue
+                A[i] = A[i] * (I - Vind[j]*Vind[j]')
+            end
+            for i in 1:k
+                if ri[i] > 0
+                    s = svd(A[i]); Vind[i] = s.Vt[1:ri[i], :]'
+                end
+            end
+        end
+
+        Atot = stack(A)
+        if norm(Jtot .- Jlast) <= conv && norm(Atot .- Alast) <= conv
+            converged = true
+        end
+        nrun += 1
+    end
+
+    # --- map reduced J, A back to full variable space:  Jᵢ = Uᵢ Jᵢ,  Aᵢ = Uᵢ Aᵢ ---
+    Jfull = [Ubig[i] * J[i] for i in 1:k]
+    Afull = [Ubig[i] * A[i] for i in 1:k]
+
+    # --- factorize (paper §3.1) ---
+    Fj = svd(reduce(vcat, Jfull))
+    S = Fj.Vt[1:r, :]
+    pis_full = [size(Ji,1) for Ji in Jfull]
+    Ufull = Fj.U[:,1:r] * Diagonal(Fj.S[1:r])
+    U = Matrix{T_}[]; idx=1
+    for p in pis_full; push!(U, Ufull[idx:idx+p-1,:]); idx+=p; end
+    Si = Matrix{T_}[]; Wi = Matrix{T_}[]
+    for i in 1:k
+        Fi = svd(Afull[i])
+        push!(Si, Fi.Vt[1:ri[i], :])
+        push!(Wi, Fi.U[:,1:ri[i]] * Diagonal(Fi.S[1:ri[i]]))
+    end
+
+    return JiveResult{T_}(Jfull, Afull, S, U, Si, Wi, r, ri)
+end
+
+
