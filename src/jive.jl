@@ -382,7 +382,7 @@ function _jive_perm_ranks(Xc::Vector{Matrix{Float64}}, n::Int;
             nsv_i = min(n, size(ind,1))
             perms_i = zeros(nperm, nsv_i)
             for p in 1:nperm
-                permuted = similar(ind)
+                permuted = similar(ind)  # create an uninitialized matrix of the same size as ind to store the permuted data for this permutation
                 for row in 1:size(ind,1)
                     permuted[row, :] = ind[row, randperm(n)]
                 end
