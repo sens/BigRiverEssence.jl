@@ -34,6 +34,6 @@ include("plskern_opt.jl")
 export plskern_opt
 
 include("jive_opt.jl")
-export _jive_rjive_core_opt, _jive_rjive_core_opt2
+export jive_rjive_opt
 
 end 

@@ -219,3 +219,217 @@ Estimated joint rank: 2, individual ranks: [3, 3]
 RObject{NilSxp}
 NULL
 =#
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# test/TestJiveOpt.jl — full verification: optimized JIVE vs original vs r.jive
+using BigRiverSchneider, BenchmarkTools, LinearAlgebra, Statistics, Random, RCall
+
+# ============================================================================
+# TEST DATA
+# ============================================================================
+Random.seed!(1234)
+n = 100
+X1 = randn(200, n); X2 = randn(180, n); X3 = randn(150, n)
+Xs = [X1, X2, X3]
+r, ri = 2, [10, 9, 8]
+
+function compare_jive(a, b; label="")
+    println("--- $label ---")
+    k = length(a.J)
+    for i in 1:k
+        println("  J[$i] ‖diff‖     : ", norm(a.J[i] .- b.J[i]))
+        println("  A[$i] ‖diff‖     : ", norm(a.A[i] .- b.A[i]))
+    end
+    println("  S ‖diff‖(abs)      : ", norm(abs.(a.S) .- abs.(b.S)))
+    for i in 1:k
+        println("  U[$i] ‖diff‖(abs): ", norm(abs.(a.U[i]) .- abs.(b.U[i])))
+        println("  Si[$i] ‖diff‖(abs): ", norm(abs.(a.Si[i]) .- abs.(b.Si[i])))
+        println("  Wi[$i] ‖diff‖(abs): ", norm(abs.(a.Wi[i]) .- abs.(b.Wi[i])))
+    end
+    println("  r match  : ", a.r == b.r)
+    println("  ri match : ", a.ri == b.ri)
+end
+
+# ============================================================================
+# PATH 1: GIVEN RANKS  (deterministic — should be bit-identical)
+# ============================================================================
+println("="^60)
+println("PATH 1: GIVEN RANKS (jive_rjive vs jive_rjive_opt)")
+println("="^60)
+ref_given = jive_rjive(Xs, r, ri)
+opt_given = jive_rjive_opt(Xs, r, ri)
+compare_jive(ref_given, opt_given; label="given ranks r=$r ri=$ri")
+
+# ============================================================================
+# STRUCTURED DATA for meaningful auto-rank test (plant rank-2 joint + rank-3 individual)
+# ============================================================================
+Random.seed!(42)
+Sjoint = randn(2, n)                                   # shared joint scores (rank 2)
+X1s = randn(200,2)*Sjoint + randn(200,3)*randn(3,n)*0.5 + randn(200,n)*0.1
+X2s = randn(180,2)*Sjoint + randn(180,3)*randn(3,n)*0.5 + randn(180,n)*0.1
+X3s = randn(150,2)*Sjoint + randn(150,3)*randn(3,n)*0.5 + randn(150,n)*0.1
+Xstruct = [X1s, X2s, X3s]
+
+# ============================================================================
+# PATH 2: AUTO RANKS — orig vs opt vs r.jive
+# ============================================================================
+println("\n", "="^60)
+println("PATH 2: AUTO RANKS (orig vs opt vs r.jive) on STRUCTURED data")
+println("="^60)
+
+Random.seed!(999); ref_auto = jive_rjive(Xstruct)
+Random.seed!(999); opt_auto = jive_rjive_opt(Xstruct)
+
+# --- r.jive's own rank estimate on the SAME data ---
+@rput X1s X2s X3s
+R"""
+suppressMessages(library(r.jive))
+# r.jive expects a list of matrices with samples as COLUMNS (same orientation as ours)
+dat <- list(t(t(X1s)), t(t(X2s)), t(t(X3s)))
+set.seed(999)
+fit <- jive(dat, method="perm", scale=TRUE, center=TRUE, conv=1e-6, maxiter=1000, showProgress=FALSE)
+rjoint <- fit$rankJ
+rindiv <- fit$rankA
+"""
+@rget rjoint rindiv
+rjoint = Int(rjoint); rindiv = Int.(vec(rindiv))
+
+println("\nEstimated ranks:")
+println("  orig  : r=$(ref_auto.r), ri=$(ref_auto.ri)")
+println("  opt   : r=$(opt_auto.r), ri=$(opt_auto.ri)")
+println("  r.jive: r=$(rjoint), ri=$(rindiv)")
+println("  orig == opt    : ", ref_auto.r==opt_auto.r && ref_auto.ri==opt_auto.ri)
+println("  orig == r.jive : ", ref_auto.r==rjoint && ref_auto.ri==rindiv)
+println("  opt  == r.jive : ", opt_auto.r==rjoint && opt_auto.ri==rindiv)
+
+if ref_auto.r == opt_auto.r && ref_auto.ri == opt_auto.ri
+    compare_jive(ref_auto, opt_auto; label="auto ranks orig vs opt (seeded)")
+else
+    println("  ⚠ orig/opt ranks differ — decomposition comparison skipped")
+end
+
+# ============================================================================
+# BENCHMARKS
+# ============================================================================
+println("\n", "="^60)
+println("BENCHMARK: time / allocations / memory")
+println("="^60)
+
+println("\n[given ranks]")
+print("orig: "); @btime jive_rjive($Xs, $r, $ri);
+print("opt : "); @btime jive_rjive_opt($Xs, $r, $ri);
+
+println("\n[auto ranks — permutation, nperm=100, structured data]")
+print("orig: "); @btime jive_rjive($Xstruct);
+print("opt : "); @btime jive_rjive_opt($Xstruct);
+#=
+============================================================
+PATH 1: GIVEN RANKS (jive_rjive vs jive_rjive_opt)
+============================================================
+--- given ranks r=2 ri=[10, 9, 8] ---
+  J[1] ‖diff‖     : 2.614023243431123e-14
+  A[1] ‖diff‖     : 5.948079138937322e-14
+  J[2] ‖diff‖     : 2.644782324513928e-14
+  A[2] ‖diff‖     : 7.084152062206963e-14
+  J[3] ‖diff‖     : 2.9317013112982227e-14
+  A[3] ‖diff‖     : 6.32646113649136e-14
+  S ‖diff‖(abs)      : 3.3089856228793285e-11
+  U[1] ‖diff‖(abs): 1.730305692050367e-14
+  Si[1] ‖diff‖(abs): 1.0072814930791707e-10
+  Wi[1] ‖diff‖(abs): 6.347388569932987e-14
+  U[2] ‖diff‖(abs): 1.8448434689245185e-14
+  Si[2] ‖diff‖(abs): 1.403601620662132e-10
+  Wi[2] ‖diff‖(abs): 9.300263759721589e-14
+  U[3] ‖diff‖(abs): 2.0133390668712735e-14
+  Si[3] ‖diff‖(abs): 2.3141443455843017e-10
+  Wi[3] ‖diff‖(abs): 1.513037261755589e-13
+  r match  : true
+  ri match : true
+
+============================================================
+PATH 2: AUTO RANKS (orig vs opt vs r.jive) on STRUCTURED data
+============================================================
+Estimating ranks via permutation test...
+Estimated joint rank: 2, individual ranks: [3, 3, 3]
+Estimating ranks via permutation test...
+Estimated joint rank: 2, individual ranks: [3, 3, 3]
+
+Estimated ranks:
+  orig  : r=2, ri=[3, 3, 3]
+  opt   : r=2, ri=[3, 3, 3]
+  r.jive: r=2, ri=[3, 3, 3]
+  orig == opt    : true
+  orig == r.jive : true
+  opt  == r.jive : true
+--- auto ranks orig vs opt (seeded) ---
+  J[1] ‖diff‖     : 1.246174139643643e-16
+  A[1] ‖diff‖     : 1.262348246019643e-15
+  J[2] ‖diff‖     : 1.3067749401763986e-16
+  A[2] ‖diff‖     : 1.0226924030486027e-15
+  J[3] ‖diff‖     : 1.2609009384206562e-16
+  A[3] ‖diff‖     : 1.026764831458663e-15
+  S ‖diff‖(abs)      : 4.7093121307358476e-14
+  U[1] ‖diff‖(abs): 3.436649887300215e-17
+  Si[1] ‖diff‖(abs): 1.0809105343392978e-12
+  Wi[1] ‖diff‖(abs): 2.44503072497833e-16
+  U[2] ‖diff‖(abs): 4.054554934086248e-17
+  Si[2] ‖diff‖(abs): 8.955813797573476e-13
+  Wi[2] ‖diff‖(abs): 4.200176663034072e-16
+  U[3] ‖diff‖(abs): 4.384879231373752e-17
+  Si[3] ‖diff‖(abs): 8.979171037124809e-13
+  Wi[3] ‖diff‖(abs): 6.761537137011926e-16
+  r match  : true
+  ri match : true
+
+============================================================
+BENCHMARK: time / allocations / memory
+============================================================
+
+[given ranks]
+orig:   1.242 s (37731 allocations: 871.00 MiB)
+opt :   878.527 ms (10235 allocations: 277.45 MiB)
+
+[auto ranks — permutation, nperm=100, structured data]
+orig: Estimating ranks via permutation test...
+Estimated joint rank: 2, individual ranks: [3, 3, 3]
+Estimating ranks via permutation test...
+Estimated joint rank: 2, individual ranks: [3, 3, 3]
+Estimating ranks via permutation test...
+Estimated joint rank: 2, individual ranks: [3, 3, 3]
+Estimating ranks via permutation test...
+Estimated joint rank: 2, individual ranks: [3, 3, 3]
+Estimating ranks via permutation test...
+Estimated joint rank: 2, individual ranks: [3, 3, 3]
+Estimating ranks via permutation test...
+Estimated joint rank: 2, individual ranks: [3, 3, 3]
+Estimating ranks via permutation test...
+Estimated joint rank: 2, individual ranks: [3, 3, 3]
+  2.709 s (687904 allocations: 1.53 GiB)
+opt : Estimating ranks via permutation test...
+Estimated joint rank: 2, individual ranks: [3, 3, 3]
+Estimating ranks via permutation test...
+Estimated joint rank: 2, individual ranks: [3, 3, 3]
+Estimating ranks via permutation test...
+Estimated joint rank: 2, individual ranks: [3, 3, 3]
+Estimating ranks via permutation test...
+Estimated joint rank: 2, individual ranks: [3, 3, 3]
+Estimating ranks via permutation test...
+Estimated joint rank: 2, individual ranks: [3, 3, 3]
+Estimating ranks via permutation test...
+Estimated joint rank: 2, individual ranks: [3, 3, 3]
+Estimating ranks via permutation test...
+Estimated joint rank: 2, individual ranks: [3, 3, 3]
+  2.552 s (28496 allocations: 559.46 MiB)
+=#

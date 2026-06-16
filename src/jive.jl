@@ -365,7 +365,7 @@ function _jive_perm_ranks(Xc::Vector{Matrix{Float64}}, n::Int;
         nsv = min(n, sum(size(X,1) for X in Xc)) # number of singular values to consider (can't be more than n or the total number of rows across all datasets)
         perms = zeros(nperm, nsv) # to store the singular values from the permuted data; each row corresponds to one permutation, and each column corresponds to one singular value (up to nsv) 
         for p in 1:nperm
-            permuted = [full[i][:, randperm(n)] for i in 1:k]. # permute the columns of each block independently to break any joint structure while preserving the individual structure and overall data characteristics; this creates a null distribution of singular values under the null hypothesis of no joint structure   
+            permuted = [full[i][:, randperm(n)] for i in 1:k] # permute the columns of each block independently to break any joint structure while preserving the individual structure and overall data characteristics; this creates a null distribution of singular values under the null hypothesis of no joint structure   
             sv = safe_svdvals(reduce(vcat, permuted))
             perms[p, 1:min(length(sv),nsv)] = sv[1:min(length(sv),nsv)] # store the singular values from this permutation in the perms matrix
         end
