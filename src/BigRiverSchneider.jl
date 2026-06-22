@@ -21,6 +21,9 @@ export SplsdaResult, splsda
 include("cca.jl")
 export CcaResult, cca, cca_transform
 
+include("scca.jl")
+export SparseCcaResult, scca
+
 
 
 
@@ -43,6 +46,9 @@ export splsda_opt
 
 include("cca_opt.jl")
 export cca_opt
+
+include("scca_opt.jl")
+export scca_opt
 
 
 end 
