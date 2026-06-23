@@ -1,166 +1,166 @@
-
+# verify_pmd_vs_r.jl — interactive check (NOT the formal test).
+# (1) ground-truth: recover a planted sparse rank-2 structure
+# (2) vs PMA::PMD (type="standard", explicit sumabsu & sumabsv)
+# (3) benchmark Julia vs R
 using BigRiverSchneider
-using LinearAlgebra, Statistics, Random
-Random.seed!(123456)
+using RCall, LinearAlgebra, Statistics, Random, BenchmarkTools
 
+# ======================================================================
+# PART 1 — GROUND TRUTH: recover a known sparse rank-2 decomposition
+# ======================================================================
+println("="^60)
+println("PART 1 — GROUND TRUTH (planted sparse structure)")
+println("="^60)
 
-#  Data: 300 observations, 40 features, 3 hidden signals
+Random.seed!(42)
+n, p = 80, 60
+# two planted factors: sparse u (rows) and sparse v (cols), well separated
+u1 = [randn(20); zeros(60)];      v1 = [randn(15); zeros(45)]
+u2 = [zeros(40); randn(20); zeros(20)]; v2 = [zeros(30); randn(15); zeros(15)]
+X = 6.0*(u1*v1') .+ 4.0*(u2*v2') .+ 0.3 .* randn(n, p)   # strong signal + noise
+Xc = X .- mean(X)
 
-n, p, r = 300, 40, 3  # 300 observations, 40 features, 3 hidden signals
-X = randn(n, r) * randn(r, p) .+ 0.1 .* randn(n, p)
-println("X is $n × $p\n")
+# budgets that allow roughly the true support sizes
+suf = 0.45 * sqrt(n)
+svf = 0.45 * sqrt(p)
+mg = pmd(Xc; sumabsu=suf, sumabsv=svf, K=2, center=false)
 
+for (k, (ut, vt)) in enumerate(((u1,v1), (u2,v2)))
+    # the planted factors are sparse; check the recovered factor aligns and
+    # its support overlaps the true support.
+    ua = abs(dot(mg.u[:,k] ./ norm(mg.u[:,k]), ut ./ norm(ut)))
+    va = abs(dot(mg.v[:,k] ./ norm(mg.v[:,k]), vt ./ norm(vt)))
+    trueu = Set(findall(!iszero, ut)); selu = Set(findall(!iszero, mg.u[:,k]))
+    truev = Set(findall(!iszero, vt)); selv = Set(findall(!iszero, mg.v[:,k]))
+    println("factor $k | u align=", round(ua,digits=3), "  v align=", round(va,digits=3),
+            " | u recall=", round(length(intersect(selu,trueu))/length(trueu),digits=2),
+            "  v recall=", round(length(intersect(selv,truev))/length(truev),digits=2))
+end
+println("(high alignment + recall ⇒ pmd recovers the planted sparse factors)")
 
-# PMD with deflation (Section 3.1). Each component is computed on the deflated data matrix, so the u's are not guaranteed to be orthogonal.
+# ======================================================================
+# PART 2 — vs PMA::PMD  (explicit sumabsu & sumabsv; center=FALSE)
+# ======================================================================
+println("\n", "="^60)
+println("PART 2 — Julia pmd vs PMA::PMD")
+println("="^60)
 
-# TEST 1 — correctness: at c = √p there's no sparsity, so the first sparse
-# loading must equal the ordinary top PC (paper eq. 2.10), up to sign.
-m_sp  = BigRiverSchneider.pmd(X; k = 1, c = sqrt(p))
-v_sp  = m_sp.loadings[:, 1]
-v_ord = svd(X .- mean(X, dims = 1)).V[:, 1]
-println("TEST 1  |⟨v_ordinary, v_sparse⟩| = ",
-        round(abs(dot(v_ord, v_sp)), digits = 6), "   (want ≈ 1.0)\n")  # the inner product of the ordinary and sparse loading vectors should be close to 1 in absolute value, indicating they are essentially the same vector up to sign.
+Random.seed!(1234)
+n2, p2 = 50, 40
+X2 = randn(n2, p2)
+K  = 3
+su = 0.5 * sqrt(n2)
+sv = 0.5 * sqrt(p2)
 
-# TEST 2 — sparsity appears as c shrinks
-println("TEST 2  smaller c ⇒ fewer nonzero loadings")
-for c in (sqrt(p), 4.0, 2.0, 1.2)    # as c decreases, we expect the number of nonzero loadings to decrease, showing that the solution is becoming sparser; this is a key property of the PMD method, where c controls the sparsity level of the solution.
-    local m = BigRiverSchneider.pmd(X; k = 1, c = c)
-    println("  c = $(round(c, digits = 2))  →  ",
-            count(!iszero, m.loadings[:, 1]), " / $p features used")
+@rput X2 K su sv
+R"""
+suppressMessages(library(PMA))
+Xc  <- X2 - mean(X2)                      # PMA centers by the GRAND mean
+out <- PMD(Xc, type="standard", sumabsu=su, sumabsv=sv, K=K,
+           center=FALSE, trace=FALSE)
+u_r <- out$u; v_r <- out$v; d_r <- out$d
+"""
+@rget u_r v_r d_r
+
+X2c = X2 .- mean(X2)
+m   = pmd(X2c; sumabsu=su, sumabsv=sv, K=K, center=false)
+
+println("  (n=$n2, p=$p2, K=$K, sumabsu=$(round(su,digits=3)), sumabsv=$(round(sv,digits=3)))")
+for k in 1:K
+    ua = abs(dot(m.u[:,k] ./ norm(m.u[:,k]), u_r[:,k] ./ norm(u_r[:,k])))
+    va = abs(dot(m.v[:,k] ./ norm(m.v[:,k]), v_r[:,k] ./ norm(v_r[:,k])))
+    nzuj = count(!iszero, m.u[:,k]); nzur = count(!iszero, u_r[:,k])
+    nzvj = count(!iszero, m.v[:,k]); nzvr = count(!iszero, v_r[:,k])
+    println("comp $k | u |cor|=", round(ua,digits=5), "  v |cor|=", round(va,digits=5),
+            " | nz u: J=$nzuj R=$nzur  v: J=$nzvj R=$nzvr",
+            " | d: J=", round(m.d[k],digits=4), " R=", round(d_r[k],digits=4))
+end
+println("\nd vector diff (‖d_j - d_r‖): ", round(norm(m.d .- d_r), sigdigits=3))
+
+# max-budget sanity: both penalties off → rank-1 SVD on both sides
+println("\n--- sumabsu=√n, sumabsv=√p (max budget → dense → ordinary SVD) ---")
+sumax_u = sqrt(n2); sumax_v = sqrt(p2)
+@rput sumax_u sumax_v
+R"""
+out2 <- PMD(X2 - mean(X2), type="standard", sumabsu=sumax_u, sumabsv=sumax_v,
+            K=1, center=FALSE, trace=FALSE)
+u_r1 <- out2$u[,1]; v_r1 <- out2$v[,1]
+"""
+@rget u_r1 v_r1
+m1 = pmd(X2c; sumabsu=sumax_u, sumabsv=sumax_v, K=1, center=false)
+F  = svd(X2c)
+println("  Julia v vs SVD V1: ", round(abs(dot(m1.v[:,1], F.V[:,1])), digits=5),
+        "   u vs SVD U1: ", round(abs(dot(m1.u[:,1], F.U[:,1])), digits=5))
+println("  R     v vs SVD V1: ", round(abs(dot(v_r1 ./ norm(v_r1), F.V[:,1])), digits=5),
+        "   u vs SVD U1: ", round(abs(dot(u_r1 ./ norm(u_r1), F.U[:,1])), digits=5))
+println("  nz at max budget — Julia u:", count(!iszero,m1.u[:,1]), "/", n2,
+        " v:", count(!iszero,m1.v[:,1]), "/", p2,
+        "   R u:", count(!iszero,u_r1), "/", n2, " v:", count(!iszero,v_r1), "/", p2)
+
+# ======================================================================
+# PART 3 — BENCHMARK
+# ======================================================================
+println("\n", "="^60)
+println("PART 3 — BENCHMARK")
+println("="^60)
+
+for (nb, pb) in ((50, 40), (200, 100))
+    Random.seed!(7)
+    Xb  = randn(nb, pb)
+    Xbc = Xb .- mean(Xb)
+    sub = 0.5 * sqrt(nb); svb = 0.5 * sqrt(pb)
+    println("\n[n=$nb, p=$pb, K=3]")
+    print("  Julia: ")
+    @btime pmd($Xbc; sumabsu=$sub, sumabsv=$svb, K=3, center=false);
+    @rput Xb sub svb
+    R"""
+    suppressMessages(library(microbenchmark))
+    Xbc <- Xb - mean(Xb)
+    mb <- microbenchmark(
+        PMD(Xbc, type="standard", sumabsu=sub, sumabsv=svb, K=3,
+            center=FALSE, trace=FALSE),
+        times=10)
+    cat("  R    :   median", round(median(mb$time)/1e6, 3), "ms\n")
+    """
 end
 
-# TEST 3 — multiple components, shapes
-m3 = BigRiverSchneider.pmd(X; k = 4, c = 2.0)
-println("\nTEST 3  k=4, c=2.0")
-println("  loadings size     : ", size(m3.loadings))
-println("  nonzeros / column : ", [count(!iszero, m3.loadings[:, j]) for j in 1:4])
+println("\n", "="^60)
 
 
-
-# TEST 4 — orthogonal variant: the u's are forced to be orthogonal, so the score correlations should be near zero; 
-# this is a more stringent test of the orthogonality constraint in the PMD method, where we expect that by forcing the u's to be orthogonal, 
-# the resulting score correlations will be close to zero, indicating that the components are indeed capturing distinct sources of variation in the data.
-
-
-mort = BigRiverSchneider.pmd_orth(X; k = 4, c = 2.0)
-println("loadings size : ", size(mort.loadings))
-println("nonzeros/col  : ", [count(!iszero, mort.loadings[:, j]) for j in 1:4])
-
-Xc = X .- mean(X, dims = 1)
-
-# scores from each method, then their correlation matrices
-function offdiag_corr(scores)
-    C = cor(scores)                      # correlations between component scores
-    n = size(C, 1)
-    maximum(abs(C[i, j]) for i in 1:n for j in 1:n if i != j)   # worst off-diagonal
-end
-
-T_pmd  = Xc * m3.loadings                # plain deflation (from Test 3)
-T_orth = Xc * mort.loadings              # orthogonal variant
-println("\nORTHOGONALITY  (max |off-diagonal score correlation|, lower = more orthogonal)")
-println("  pmd      : ", round(offdiag_corr(T_pmd),  digits = 4))
-println("  pmd_orth : ", round(offdiag_corr(T_orth), digits = 4))
-
-# the real check: recover the u's and confirm they're mutually orthogonal.
-# (pmd_orth doesn't store U, so recompute scores T = Xc*V and orthogonality
-#  shows up as near-zero off-diagonal dot products among the u directions)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# optimization test — full output comparison
-using BigRiverSchneider, BenchmarkTools, Random, LinearAlgebra, Statistics
-X = randn(500, 300)
-
-# helper: compare two pcaStructures field by field
-function compare_pmd(a, b; label="")
-    println("--- $label ---")
-    println("  mean      ‖diff‖     : ", norm(a.mean .- b.mean))
-    println("  scale     ‖diff‖     : ", norm(a.scale .- b.scale))
-    println("  loadings  ‖diff‖(abs): ", norm(abs.(a.loadings) .- abs.(b.loadings)))   # sign arbitrary
-    println("  variances ‖diff‖     : ", norm(a.variances .- b.variances))
-    println("  propOFvar ‖diff‖     : ", norm(a.propOFvar .- b.propOFvar))
-    println("  loadings size match  : ", size(a.loadings) == size(b.loadings))
-    # sparsity pattern: the SET of selected (nonzero) variables per component must match
-    sel(M) = [Set(findall(!iszero, M[:, j])) for j in 1:size(M,2)]
-    println("  sparsity pattern match: ", sel(a.loadings) == sel(b.loadings))
-end
-
-# seed identically before each call (random init in spca_component)
-Random.seed!(1234); ref      = pmd(X; k=5)
-Random.seed!(1234); opt      = pmd_opt(X; k=5)
-Random.seed!(1234); ref_orth = pmd_orth(X; k=5)
-Random.seed!(1234); opt_orth = pmd_orth_opt(X; k=5)
-
-compare_pmd(ref, opt; label="pmd: orig vs opt")
-compare_pmd(ref_orth, opt_orth; label="pmd_orth: orig vs opt")
-
-# ---- also verify the transform/reconstruction round-trips match ----
-println("\n--- transform & reconstruction ---")
-sc_ref = pca_transform(ref, X)
-sc_opt = pca_transform(opt, X)
-println("  pmd scores ‖diff‖(abs)        : ", norm(abs.(sc_ref) .- abs.(sc_opt)))
-rc_ref = pca_invtransform(ref, sc_ref)
-rc_opt = pca_invtransform(opt, sc_opt)
-println("  pmd reconstruction ‖diff‖     : ", norm(rc_ref .- rc_opt))
-
-sc_ref_o = pca_transform(ref_orth, X)
-sc_opt_o = pca_transform(opt_orth, X)
-println("  pmd_orth scores ‖diff‖(abs)   : ", norm(abs.(sc_ref_o) .- abs.(sc_opt_o)))
-rc_ref_o = pca_invtransform(ref_orth, sc_ref_o)
-rc_opt_o = pca_invtransform(opt_orth, sc_opt_o)
-println("  pmd_orth reconstruction ‖diff‖: ", norm(rc_ref_o .- rc_opt_o))
-
-# ---- benchmark ----
-println("\n=== pmd ===")
-print("orig: "); @btime pmd($X; k=5);
-print("opt : "); @btime pmd_opt($X; k=5);
-println("=== pmd_orth ===")
-print("orig: "); @btime pmd_orth($X; k=5);
-print("opt : "); @btime pmd_orth_opt($X; k=5);
 #=
---- pmd: orig vs opt ---
-  mean      ‖diff‖     : 0.0
-  scale     ‖diff‖     : 0.0
-  loadings  ‖diff‖(abs): 3.035806350154647e-15
-  variances ‖diff‖     : 3.845925372767128e-15
-  propOFvar ‖diff‖     : 1.309687503460227e-17
-  loadings size match  : true
-  sparsity pattern match: true
---- pmd_orth: orig vs opt ---
-  mean      ‖diff‖     : 0.0
-  scale     ‖diff‖     : 0.0
-  loadings  ‖diff‖(abs): 1.0674422605731333e-15
-  variances ‖diff‖     : 3.1714313080323688e-15
-  propOFvar ‖diff‖     : 1.0551910960100405e-17
-  loadings size match  : true
-  sparsity pattern match: true
+============================================================
+PART 1 — GROUND TRUTH (planted sparse structure)
+============================================================
+factor 1 | u align=0.999  v align=0.999 | u recall=1.0  v recall=1.0
+factor 2 | u align=0.999  v align=0.999 | u recall=1.0  v recall=1.0
+(high alignment + recall ⇒ pmd recovers the planted sparse factors)
 
---- transform & reconstruction ---
-  pmd scores ‖diff‖(abs)        : 1.010448390320123e-13
-  pmd reconstruction ‖diff‖     : 1.3245071170843573e-13
-  pmd_orth scores ‖diff‖(abs)   : 3.835939221360121e-14
-  pmd_orth reconstruction ‖diff‖: 5.322783051703354e-14
+============================================================
+PART 2 — Julia pmd vs PMA::PMD
+============================================================
+  (n=50, p=40, K=3, sumabsu=3.536, sumabsv=3.162)
+comp 1 | u |cor|=1.0  v |cor|=1.0 | nz u: J=22 R=22  v: J=16 R=16 | d: J=11.1351 R=11.1351
+comp 2 | u |cor|=1.0  v |cor|=1.0 | nz u: J=24 R=24  v: J=17 R=17 | d: J=10.3343 R=10.3343
+comp 3 | u |cor|=1.0  v |cor|=1.0 | nz u: J=20 R=20  v: J=19 R=19 | d: J=10.5875 R=10.5875
 
-=== pmd ===
-orig:   238.930 ms (926827 allocations: 783.45 MiB)
-opt :   191.536 ms (139 allocations: 2.44 MiB)
-=== pmd_orth ===
-orig:   306.623 ms (1120253 allocations: 938.18 MiB)
-opt :   166.059 ms (147 allocations: 1.30 MiB)
+d vector diff (‖d_j - d_r‖): 2.15e-14
+
+--- sumabsu=√n, sumabsv=√p (max budget → dense → ordinary SVD) ---
+  Julia v vs SVD V1: 1.0   u vs SVD U1: 1.0
+  R     v vs SVD V1: 1.0   u vs SVD U1: 1.0
+  nz at max budget — Julia u:50/50 v:40/40   R u:50/50 v:40/40
+
+============================================================
+PART 3 — BENCHMARK
+============================================================
+
+[n=50, p=40, K=3]
+  Julia:   293.500 μs (44 allocations: 155.00 KiB)
+  R    :   median 15.917 ms
+
+[n=200, p=100, K=3]
+  Julia:   1.807 ms (47 allocations: 984.28 KiB)
+  R    :   median 28.676 ms
+
+============================================================
 =#
