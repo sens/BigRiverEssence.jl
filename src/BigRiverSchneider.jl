@@ -3,23 +3,26 @@ module BigRiverSchneider
 
 using LinearAlgebra, Statistics, Random
 
+
+include("common_functions.jl")
+
 include("pca.jl")
-export pca, pcaStructure, pca_transform, pca_invtransform, pca_opt
+export pcaStructure, pca, pca_transform, pca_invtransform
 
 include("pmd.jl") 
-export  pmd, pmd_orth
+export  pmdStructure, pmd, pmd_orth
 
 include("plskern.jl") 
-export  plskern, Plsr, plskerncoef, plskernpredict, plskerntransform
+export  plskernStructure, plskern, plskerncoef, plskernpredict, plskerntransform
 
 include("jive.jl") 
-export  JiveResult, jive, jive_fast, jive_rjive
+export  jiveStructure, jive
 
 include("splsda.jl")
-export SplsdaResult, splsda
+export splsdaStructure, splsda
 
 include("cca.jl")
-export CcaResult, cca, cca_transform
+export ccaStructure, cca, cca_transform
 
 include("scca.jl")
 export SparseCcaResult, scca
@@ -28,27 +31,7 @@ export SparseCcaResult, scca
 
 
 
-# Optimized functions
-include("pca_opt.jl")
-export pca_opt
 
-include("pmd_opt.jl")
-export pmd_opt, pmd_orth_opt
-
-include("plskern_opt.jl")
-export plskern_opt
-
-include("jive_opt.jl")
-export jive_rjive_opt
-
-include("splsda_opt.jl")
-export splsda_opt
-
-include("cca_opt.jl")
-export cca_opt
-
-include("scca_opt.jl")
-export scca_opt
 
 
 end 
