@@ -34,16 +34,15 @@ function finding_v!(v, s, z, c)
     return v
 end
 
-# Top-k right singular vectors via Gram-matrix partial eigen (matches R's
-# CheckPMDV). Avoids svd's n×p U factor; returns only the k vectors needed.
+
 function init_rsv(Xc, k)
     n, p = size(Xc); T = eltype(Xc)
     if p <= n
-        E = eigen(Symmetric(transpose(Xc) * Xc), p-k+1:p)   # top-k only
-        return E.vectors[:, k:-1:1]                          # p×k, descending
+        E = eigen(Symmetric(transpose(Xc) * Xc), p-k+1:p)   
+        return E.vectors[:, k:-1:1]                          
     else
         E  = eigen(Symmetric(Xc * transpose(Xc)), n-k+1:n)
-        Vk = transpose(Xc) * E.vectors[:, k:-1:1]            # p×k
+        Vk = transpose(Xc) * E.vectors[:, k:-1:1]            
         @inbounds for j in 1:k
             nrm = norm(@view Vk[:, j]); iszero(nrm) && (nrm = T(0.05))
             @views Vk[:, j] ./= nrm
@@ -52,14 +51,13 @@ function init_rsv(Xc, k)
     end
 end
 
-# Closed-form cumulative PVE: ‖proj_k‖²_F = tr(Mₖ⁻¹ Bₖ), all k×k.
-# Algebraically identical to projecting Xc, but never forms an n×p matrix.
+
 function prop_var_explained(Xc, V)
     K = size(V, 2); T = eltype(Xc)
     totsq = sum(abs2, Xc)
-    A = Xc * V              # n×K, once
-    M = transpose(V) * V    # K×K
-    B = transpose(A) * A    # K×K
+    A = Xc * V              
+    M = transpose(V) * V   
+    B = transpose(A) * A    
     pve = Vector{T}(undef, K)
     @inbounds for k in 1:K
         pve[k] = tr(Symmetric(M[1:k, 1:k]) \ B[1:k, 1:k]) / totsq
@@ -67,7 +65,7 @@ function prop_var_explained(Xc, V)
     return pve
 end
 
-# Buffer-based: nothing allocated inside; u/v live in caller-owned buffers.
+
 function spca_component!(v, X, c, u, Xv, Xtu, s, vold; tol = 1e-7, niter = 20)
     T = eltype(v)
     for _ in 1:niter
@@ -106,21 +104,21 @@ function spc(X; k = 2, c = sqrt(size(X, 2)) / 2, standardize = false,
     n, p = size(X)
     1 <= c <= sqrt(p) || throw(ArgumentError("c (=sumabsv) must be in [1, √p]=[1,$(sqrt(p))], got $c"))
     T  = eltype(float(X))
-    means = T.(vec(mean(X, dims = 1)))                 # per-column mean (matches scale(center=TRUE))
+    means = T.(vec(mean(X, dims = 1)))                
     sigma = standardize ? T.(vec(std(X, dims = 1))) : ones(T, p)
     Xc = standardize ? (X .- means') ./ sigma' : T.(X .- means')
 
     Vinit = init_rsv(Xc, k)
-    Rmat  = copy(Xc)                                   # deflation workspace
+    Rmat  = copy(Xc)                                   
     V = zeros(T, p, k); d = zeros(T, k)
-    u = Vector{T}(undef, n); Xv = Vector{T}(undef, n)  # buffers allocated ONCE
+    u = Vector{T}(undef, n); Xv = Vector{T}(undef, n)  
     Xtu = Vector{T}(undef, p); s = Vector{T}(undef, p)
     vold = Vector{T}(undef, p); v = Vector{T}(undef, p)
     for j in 1:k
         copyto!(v, view(Vinit, :, j))
         d[j] = spca_component!(v, Rmat, c, u, Xv, Xtu, s, vold; tol = tol, niter = niter)
         @views V[:, j] .= v
-        BLAS.ger!(-d[j], u, v, Rmat)                   # deflate in place
+        BLAS.ger!(-d[j], u, v, Rmat)                   
     end
     SignConsistency_opt!(V)
     vars = d .^ 2 ./ (n - 1)
@@ -132,7 +130,7 @@ function spc_orth(X; k = 2, c = sqrt(size(X, 2)) / 2, standardize = false,
     n, p = size(X)
     1 <= c <= sqrt(p) || throw(ArgumentError("c (=sumabsv) must be in [1, √p]=[1,$(sqrt(p))], got $c"))
     T  = eltype(float(X))
-    means = T.(vec(mean(X, dims = 1)))                 # per-column mean
+    means = T.(vec(mean(X, dims = 1)))                
     sigma = standardize ? T.(vec(std(X, dims = 1))) : ones(T, p)
     Xc = standardize ? (X .- means') ./ sigma' : T.(X .- means')
 

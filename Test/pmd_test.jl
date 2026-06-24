@@ -143,6 +143,139 @@ end
     @test_throws ArgumentError pmd(X; sumabsu=2.0, sumabsv=sqrt(p)+1)  # sumabsv > √p
 end
 
+@testset "internal: _pmd_soft (soft-threshold operator)" begin
+    soft = BigRiverSchneider._pmd_soft
+    @test soft(5.0, 2.0)  == 3.0          # shrink toward 0 by λ
+    @test soft(-5.0, 2.0) == -3.0         # sign preserved
+    @test soft(1.0, 2.0)  == 0.0          # |a| ≤ λ ⇒ exactly 0
+    @test soft(-1.0, 2.0) == 0.0
+    @test soft(3.0, 0.0)  == 3.0          # λ=0 is identity
+    @test soft(0.0, 1.0)  == 0.0          # sign(0)=0 ⇒ 0, no NaN
+    # matches the closed form elementwise on a random vector
+    a = randn(100); λ = 0.7
+    @test soft.(a, λ) ≈ sign.(a) .* max.(abs.(a) .- λ, 0.0)
+end
+
+@testset "internal: _pmd_l2n (guarded L2 norm)" begin
+    l2n = BigRiverSchneider._pmd_l2n
+    @test l2n([3.0, 4.0]) == 5.0
+    @test l2n(zeros(5))   == 0.05         # PMA zero-guard (avoids /0)
+    a = randn(50)
+    @test l2n(a) ≈ norm(a)                # equals Euclidean norm when nonzero
+end
+
+@testset "internal: _pmd_l1_norm & _pmd_l1_norm_soft (L1/L2 ratio)" begin
+    l1n  = BigRiverSchneider._pmd_l1_norm
+    l1ns = BigRiverSchneider._pmd_l1_norm_soft
+    soft = BigRiverSchneider._pmd_soft
+    # ratio = ‖a‖₁ / ‖a‖₂ ; for ones(m) this is √m
+    @test l1n([3.0, 4.0]) ≈ 7 / 5
+    @test l1n(ones(9))    ≈ 3.0           # 9 / 3
+    @test l1n(zeros(4))   == 0.0          # 0 / 0.05 guard ⇒ 0
+    # soft-then-ratio variant equals applying soft, then the plain ratio
+    a = randn(80); λ = 0.5
+    @test l1ns(a, λ) ≈ l1n(soft.(a, λ))
+    # bounded below by 1 for any nonzero vector (Cauchy–Schwarz)
+    @test l1n(randn(30)) >= 1 - 1e-9
+end
+
+@testset "internal: _pmd_l1diff (L1 distance)" begin
+    l1diff = BigRiverSchneider._pmd_l1diff
+    @test l1diff([1.0, 2.0, 3.0], [1.0, 2.0, 3.0]) == 0.0
+    @test l1diff([1.0, 0.0], [0.0, 1.0]) == 2.0
+    a = randn(40); b = randn(40)
+    @test l1diff(a, b) ≈ sum(abs, a .- b)
+end
+
+@testset "internal: _pmd_binary_search (λ solving the L1 budget)" begin
+    bs   = BigRiverSchneider._pmd_binary_search
+    l1n  = BigRiverSchneider._pmd_l1_norm
+    l1ns = BigRiverSchneider._pmd_l1_norm_soft
+    # already within budget ⇒ no thresholding needed ⇒ λ = 0
+    a = ones(4)                            # l1_norm = 2.0
+    @test l1n(a) ≈ 2.0
+    @test bs(a, 3.0) == 0.0                # budget 3 ≥ 2 ⇒ 0
+    @test bs(zeros(6), 1.0) == 0.0         # all-zero input ⇒ 0
+    # over budget ⇒ positive λ that drives the soft ratio to the target
+    Random.seed!(3)
+    z = randn(60)
+    @test l1n(z) > 3.0                     # ensure thresholding is actually required
+    λ = bs(z, 3.0)
+    @test λ > 0
+    @test λ <= maximum(abs, z)             # never exceeds the largest coefficient
+    @test isapprox(l1ns(z, λ), 3.0; atol = 1e-2)   # hits the requested budget
+    # monotone: a tighter budget needs a larger threshold
+    @test bs(z, 2.0) >= bs(z, 4.0)
+end
+
+@testset "internal: _pmd_soft_normalize! (soft-threshold then unit-normalize)" begin
+    sn   = BigRiverSchneider._pmd_soft_normalize!
+    soft = BigRiverSchneider._pmd_soft
+    arg = [3.0, -4.0, 0.5]; out = similar(arg)
+    sn(out, arg, 1.0)                      # soft = [2,-3,0] ; normalize by √13
+    @test out ≈ [2.0, -3.0, 0.0] ./ sqrt(13)
+    @test norm(out) ≈ 1.0                  # unit L2 norm when entries survive
+    @test sign.(out) == sign.([2.0, -3.0, 0.0])   # signs preserved
+    # matches the explicit construction on a random vector
+    a = randn(50); o = similar(a); λ = 0.6
+    sn(o, a, λ)
+    s = soft.(a, λ)
+    @test o ≈ s ./ norm(s)
+    # everything thresholded away ⇒ zeros / 0.05 guard ⇒ all-zero output, no NaN
+    o2 = similar(a); sn(o2, a, maximum(abs, a) + 1.0)
+    @test all(iszero, o2)
+end
+
+@testset "internal: _pmd_check_v (SVD-based initialization)" begin
+    cv = BigRiverSchneider._pmd_check_v
+    # tall matrix (p ≤ n): uses svd(xᵀx) branch
+    Random.seed!(21)
+    Xt = randn(60, 40); K = 3
+    Vt = cv(Xt, K)
+    @test size(Vt) == (40, K)
+    Ft = svd(Xt)
+    for k in 1:K
+        @test isapprox(norm(@view Vt[:, k]), 1.0; atol = 1e-8)        # unit columns
+        @test abs(dot(Vt[:, k], Ft.V[:, k])) > 0.999                 # = right sing. vec (up to sign)
+    end
+    # wide matrix (p > n): uses svd(xxᵀ) branch + back-projection
+    Xw = randn(30, 50)
+    Vw = cv(Xw, K)
+    @test size(Vw) == (50, K)
+    Fw = svd(Xw)
+    for k in 1:K
+        @test isapprox(norm(@view Vw[:, k]), 1.0; atol = 1e-8)
+        @test abs(dot(Vw[:, k], Fw.V[:, k])) > 0.999
+    end
+end
+
+@testset "internal: _pmd_smd! (rank-1 sparse core)" begin
+    smd = BigRiverSchneider._pmd_smd!
+    cv  = BigRiverSchneider._pmd_check_v
+    Random.seed!(31)
+    n, p = 50, 40
+    X = randn(n, p); Xc = X .- mean(X)
+    v0 = cv(Xc, 1)[:, 1]
+    u = Vector{Float64}(undef, n); v = Vector{Float64}(undef, p)
+    vold = Vector{Float64}(undef, p)
+    argu = Vector{Float64}(undef, n); argv = Vector{Float64}(undef, p)
+    # at max budget (√n, √p) no penalty binds ⇒ pure power iteration ⇒ rank-1 SVD
+    d = smd(Xc, v0, sqrt(n), sqrt(p), 50, u, v, vold, argu, argv)
+    F = svd(Xc)
+    @test isapprox(norm(u), 1.0; atol = 1e-6)
+    @test isapprox(norm(v), 1.0; atol = 1e-6)
+    @test abs(dot(u, F.U[:, 1])) > 0.999          # u → U₁
+    @test abs(dot(v, F.V[:, 1])) > 0.999          # v → V₁
+    @test isapprox(d, F.S[1]; rtol = 1e-5)        # d → σ₁
+    @test d > 0
+    # a binding budget makes v genuinely sparse
+    u2 = similar(u); v2 = similar(v); vo2 = similar(vold)
+    au2 = similar(argu); av2 = similar(argv)
+    smd(Xc, v0, 0.4 * sqrt(n), 0.4 * sqrt(p), 50, u2, v2, vo2, au2, av2)
+    @test count(!iszero, v2) < p
+    @test count(!iszero, u2) < n
+end
+
 
 @testset "matches R PMA::PMD (offline reference fixtures)" begin
     # Reads precomputed R outputs from Test/Data/PMD/ (generated by pmd.R).
