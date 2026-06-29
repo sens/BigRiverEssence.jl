@@ -120,32 +120,95 @@ bench2("BRS.scca (via Julia)",
                       penaltyx = px, penaltyz = pz, K = K, niter = niter, trace = FALSE))
 
 # ===========================================================================
-# 5. SPLSDA  vs mixOmics::splsda
+# 4a. JIVE  vs r.jive  (given ranks)
 # ===========================================================================
-line(); cat("  SPLSDA  vs  mixOmics::splsda\n"); line()
-suppressMessages(library(mixOmics))
-set.seed(123)
-classes <- c("A", "B", "C"); n_per <- 20
-y <- factor(rep(classes, each = n_per)); n <- length(y); p <- 200
-X <- matrix(rnorm(n * p) * 0.5, n, p)
-for (ci in seq_along(classes))
-  X[y == classes[ci], 1:10] <- X[y == classes[ci], 1:10] + ci * 2.0
-ncomp <- 2L; keepX <- c(10L, 10L)
+line(); cat("  JIVE  vs  r.jive (given ranks)\n"); line()
+suppressMessages(library(r.jive))
+set.seed(2024)
+n <- 80; rT <- 2L; r1 <- 3L; r2 <- 3L; p1 <- 60; p2 <- 50
+S  <- matrix(rnorm(rT * n), rT, n)
+U1 <- matrix(rnorm(p1 * rT), p1, rT); U2 <- matrix(rnorm(p2 * rT), p2, rT)
+S1 <- matrix(rnorm(r1 * n), r1, n);   W1 <- matrix(rnorm(p1 * r1), p1, r1)
+S2 <- matrix(rnorm(r2 * n), r2, n);   W2 <- matrix(rnorm(p2 * r2), p2, r2)
+X1 <- U1 %*% S + W1 %*% S1 + 0.3 * matrix(rnorm(p1 * n), p1, n)
+X2 <- U2 %*% S + W2 %*% S2 + 0.3 * matrix(rnorm(p2 * n), p2, n)
 
-rj <- splsda(X, y, ncomp = ncomp, keepX = keepX)
-rlx <- rj$loadings$X
+rj <- jive(list(X1, X2), rankJ = rT, rankA = c(r1, r2), method = "given",
+           conv = 1e-6, maxiter = 1000, scale = TRUE, center = TRUE, showProgress = FALSE)
 
-yc <- as.character(y)
-julia_assign("Xspl", X); julia_assign("yspl", yc)
-julia_command(sprintf("mj = BRS.splsda(Xspl, yspl, %d, [%d, %d])", ncomp, keepX[1], keepX[2]))
-lx_jl <- julia_eval("mj.loadings_X")             # extract by name, Julia-side
-verdict(colmisalign(lx_jl, rlx), sets_match(lx_jl, rlx))
+# assign the blocks into Julia, fit there, pull the joint back BY NAME (mj.J)
+julia_assign("X1", X1); julia_assign("X2", X2)
+julia_command(sprintf("mj = BRS.jive([X1, X2], %d, [%d, %d])", rT, r1, r2))
+J1_jl <- julia_eval("reduce(vcat, mj.J)")        # stacked joint, extracted Julia-side
 
-bench2("BRS.splsda (via Julia)",
-       function() julia_eval(sprintf("BRS.splsda(Xspl, yspl, %d, [%d, %d])", ncomp, keepX[1], keepX[2])),
-       "mixOmics::splsda (native R)",
-       function() splsda(X, y, ncomp = ncomp, keepX = keepX),
-       times = 10L)                                     # r.jive is slow ⇒ fewer reps
+# subspace agreement via canonical correlation (decompositions aren't bit-identical)
+Jr <- rbind(rj$joint[[1]], rj$joint[[2]])
+qrz <- function(M) qr.Q(qr(M))[, seq_len(rT), drop = FALSE]
+cc  <- svd(t(qrz(t(J1_jl))) %*% qrz(t(Jr)))$d
+verdict(1 - min(cc))                             # smaller = more identical
+
+bench2("BRS.jive (via Julia)",
+       function() julia_eval(sprintf("BRS.jive([X1, X2], %d, [%d, %d])", rT, r1, r2)),
+       "r.jive (native R)",
+       function() jive(list(X1, X2), rankJ = rT, rankA = c(r1, r2), method = "given",
+                       conv = 1e-6, maxiter = 1000, scale = TRUE, center = TRUE, showProgress = FALSE),
+       times = 5L)
+
+# ===========================================================================
+# 4b. JIVE  vs r.jive  (ESTIMATED ranks — permutation test)
+# ===========================================================================
+line(); cat("  JIVE  vs  r.jive (estimated ranks, permutation)\n"); line()
+# Strong, well-separated structure (mirrors your fixture generator): joint rank 2,
+# individual rank 3 each. Build it exactly as generate_jive_reference.R does.
+set.seed(99)
+ns <- 80; ps1 <- 60; ps2 <- 50
+Sj  <- matrix(rnorm(2 * ns), 2, ns)
+i1  <- matrix(rnorm(ps1 * 3), ps1, 3) %*% matrix(rnorm(3 * ns), 3, ns)
+i2  <- matrix(rnorm(ps2 * 3), ps2, 3) %*% matrix(rnorm(3 * ns), 3, ns)
+X1s <- matrix(rnorm(ps1 * 2), ps1, 2) %*% Sj + 0.5 * i1 + 0.1 * matrix(rnorm(ps1 * ns), ps1, ns)
+X2s <- matrix(rnorm(ps2 * 2), ps2, 2) %*% Sj + 0.5 * i2 + 0.1 * matrix(rnorm(ps2 * ns), ps2, ns)
+
+# native R: r.jive estimates ranks itself (method="perm", no nperm argument)
+set.seed(99)
+rj <- jive(list(X1s, X2s), method = "perm", scale = TRUE, center = TRUE,
+           orthIndiv = TRUE, showProgress = FALSE)
+r_rank_J <- rj$rankJ
+r_rank_A <- rj$rankA
+
+# Julia: omit ranks ⇒ BRS.jive's permutation estimate; fix its RNG Julia-side
+julia_assign("X1p", X1s); julia_assign("X2p", X2s)
+julia_command("import Random; Random.seed!(999)")
+julia_command("mjp = BRS.jive([X1p, X2p]; nperm = 100)")
+jl_rank_J <- as.integer(julia_eval("mjp.r"))
+jl_rank_A <- as.integer(julia_eval("collect(mjp.ri)"))
+
+cat(sprintf("  Julia : joint = %d   indiv = [%s]\n",
+            jl_rank_J, paste(jl_rank_A, collapse = ", ")))
+cat(sprintf("  r.jive: joint = %d   indiv = [%s]\n",
+            r_rank_J, paste(r_rank_A, collapse = ", ")))
+ranks_match <- jl_rank_J == r_rank_J && all(jl_rank_A == r_rank_A)
+cat(sprintf("  result: %-11s  (ranks %s)\n",
+            if (ranks_match) "IDENTICAL" else "DIFFER",
+            if (ranks_match) "match" else "DIFFER"))
+
+# if the joint ranks agree, also compare the joint SUBSPACE
+if (jl_rank_J == r_rank_J && jl_rank_J > 0) {
+  J1_jl <- julia_eval("reduce(vcat, mjp.J)")
+  Jr <- rbind(rj$joint[[1]], rj$joint[[2]])
+  d  <- jl_rank_J
+  qrz <- function(M) qr.Q(qr(M))[, seq_len(d), drop = FALSE]
+  cc  <- svd(t(qrz(t(J1_jl))) %*% qrz(t(Jr)))$d
+  cat(sprintf("  joint subspace: min canonical corr = %.5f%s\n",
+              min(cc), if (min(cc) > 0.99) "  ✓" else "  ✗"))
+}
+
+# benchmark both auto-rank fits (permutation runs inside each ⇒ slow ⇒ few reps)
+bench2("BRS.jive auto (via Julia)",
+       function() julia_eval("BRS.jive([X1p, X2p]; nperm = 100)"),
+       "r.jive perm (native R)",
+       function() jive(list(X1s, X2s), method = "perm", scale = TRUE, center = TRUE,
+                       orthIndiv = TRUE, showProgress = FALSE),
+       times = 3L)
 
 # ===========================================================================
 # 5. SPLSDA  vs mixOmics::splsda
@@ -179,3 +242,6 @@ cat("  Done. Timings are same-clock microbenchmark medians.\n")
 cat("  NOTE: the Julia times INCLUDE the JuliaCall R->Julia->R marshalling cost,\n")
 cat("  so they're 'called-from-R' times, not Julia's standalone speed.\n")
 line()
+
+
+
