@@ -10,7 +10,7 @@
 const BRE           = BigRiverEssence
 const scca          = BRE.scca
 const sccaStructure = BRE.sccaStructure
-const _soft         = BRE._softcca!
+
 const _l2           = BRE._l2n_val
 const _l1n          = BRE._l1_of_norm
 const _l1ns         = BRE._l1_of_norm_soft
@@ -114,18 +114,18 @@ end
 # surfaces here rather than as a downstream symptom.
 # ----------------------------------------------------------------------------
 
-@testset "internal: _softcca! (soft-threshold)" begin
+@testset "internal: BRE._softcca!cca! (soft-threshold)" begin
 	# The L1 proximal operator: shrink toward 0 by λ, clamp to 0 once |a| ≤ λ. The
 	# single primitive that creates sparsity in the canonical vectors.
 	a = [5.0, -3.0, 1.0, -0.5];
 	out = similar(a)
-	_soft(out, a, 2.0)
+	BRE._softcca!(out, a, 2.0)
 	@test out ≈ [3.0, -1.0, 0.0, 0.0]              # 5→3, 3→1, |1|&|0.5| ≤ 2 ⇒ 0
-	@test _soft(similar(a), a, 0.0) ≈ a            # λ=0 is the identity
+	@test BRE._softcca!(similar(a), a, 0.0) ≈ a            # λ=0 is the identity
 	b = randn(50);
 	o = similar(b);
 	λ = 0.6
-	_soft(o, b, λ)
+	BRE._softcca!(o, b, λ)
 	@test o ≈ sign.(b) .* max.(abs.(b) .- λ, 0.0)  # matches the closed form
 end
 
