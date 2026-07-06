@@ -1,4 +1,4 @@
-module BigRiverSchneider
+module BigRiverEssence
 
 
 using LinearAlgebra, Statistics, Random
