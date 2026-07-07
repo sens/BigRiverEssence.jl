@@ -213,9 +213,9 @@ end
 		Y[1:nsh, :] .+= sh   # plant shared structure
 
 		ref = MultivariateStats.fit(MultivariateStats.CCA, X, Y; method = :svd)
-		rc  = MultivariateStats.correlations(ref)
-		rPx = MultivariateStats.xprojection(ref);
-		rPy = MultivariateStats.yprojection(ref)
+        rc  = cor(ref)
+        rPx = MultivariateStats.projection(ref, :x)
+        rPy = MultivariateStats.projection(ref, :y)
 
 		for meth in (:svd, :cov)
 			M = BigRiverEssence.cca(X, Y; method = meth)
