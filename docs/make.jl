@@ -9,13 +9,13 @@ end
 makedocs(; modules=[BigRiverEssence], sitename="BigRiverEssence.jl", pages=[
         "Home" => "index.md",
         "Getting Started" => "pca_tutorial.md",
+        "API Reference" => "api.md", 
         # "Example: MLM for ordinal predictors" => "example_ordinal_data.md",
         # "Types and Functions" => "functions.md",
     ]
 )
 
 deploydocs(;
-    repo= "https://github.com/senresearch/BigRiverEssence.jl",
+    repo = "github.com/BanerjeeAbhisek/BigRiverEssence.jl.git",
     devbranch= "main",
-    devurl = "stable"
 )

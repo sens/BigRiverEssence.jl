@@ -1,4 +1,5 @@
 [deps]
+BigRiverEssence = "2768b56d-1570-4417-9919-1aa303d8c95e"
 DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
 Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
