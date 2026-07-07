@@ -198,7 +198,7 @@ end
 	# columns wouldn't, and the loadings_Y comparison would spuriously fail.
 	refdir = joinpath(@__DIR__, "Data", "SPLSDA")
 	if !isfile(joinpath(refdir, "X.csv"))
-		@info "sPLS-DA mixOmics fixtures not found; run splsda.R to create them."
+		@info "sPLS-DA mixOmics fixtures not found; run generate_splsda_reference.R to create them."
 	else
 		# Record the mixOmics version that produced the fixtures (results can drift
 		# across versions, so provenance helps when chasing a mismatch).

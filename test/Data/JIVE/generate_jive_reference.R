@@ -1,7 +1,7 @@
 # generate_jive_reference.R
 # Generates r.jive reference fixtures for the Julia JIVE test suite.
 # RUN AS A FILE (so output lands beside it):
-#   cd Test/Data/JIVE && Rscript jive.R     — or — setwd(".../Test/Data/JIVE"); source("jive.R")
+#   cd Test/Data/JIVE && Rscript generate_jive_reference.R     — or — setwd(".../Test/Data/JIVE"); source("generate_jive_reference.R")
 #
 # Requires: install.packages("r.jive")
 

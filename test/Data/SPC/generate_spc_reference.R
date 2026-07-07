@@ -1,8 +1,8 @@
 # generate_spc_reference.R
 # Generates the SPC (Witten sparse PCA) reference fixtures for the Julia suite.
 # RUN AS A FILE so it can locate itself — do NOT paste line-by-line.
-#   From a shell:   Rscript spc.R
-#   From R:         source("Test/Data/SPC/spc.R")
+#   From a shell:   Rscript generate_spc_reference.R
+#   From R:         source("Test/Data/SPC/generate_spc_reference.R")
 #
 # Requires: install.packages("PMA")
 

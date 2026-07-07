@@ -352,7 +352,7 @@ end
 	# orth=TRUE), using saved fixtures. Skips with a note if they're absent.
 	refdir = joinpath(@__DIR__, "Data", "SPC")
 	if !isfile(joinpath(refdir, "X.csv"))
-		@info "SPC R-reference fixtures not found; skipping. Run spc.R to create them."
+		@info "SPC R-reference fixtures not found; skipping. Run generate_spc_reference.R to create them."
 	else
 		# Record the PMA version that produced the fixtures (results can shift across
 		# versions, so provenance helps when chasing a mismatch).

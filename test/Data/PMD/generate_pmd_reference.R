@@ -1,8 +1,8 @@
 # generate_pmd_reference.R
 # Generates the PMD reference fixtures used by the Julia test suite.
 # RUN THIS AS A FILE so it can locate itself — do NOT paste it line-by-line.
-#   From a shell:   Rscript pmd.R
-#   From R:         source("Test/Data/PMD/pmd.R")
+#   From a shell:   Rscript generate_pmd_reference.R
+#   From R:         source("Test/Data/PMD/generate_pmd_reference.R")
 #
 # Requires: install.packages("PMA")
 

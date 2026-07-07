@@ -40,7 +40,7 @@ function canon(B1, B2, d)
 	svdvals(Q1' * Q2)
 end
 
-# Simulated data with KNOWN structure (matches jive.R's generator): a shared joint
+# Simulated data with KNOWN structure (matches generate_jive_reference.R's generator): a shared joint
 # signal S (rank rT) plus block-specific individual signals (ranks r1T, r2T), plus
 # noise. Used by the given-ranks tests.
 function make_data(; seed = 2024, noise = 0.3)
@@ -249,10 +249,10 @@ end
 @testset "matches r.jive (offline reference fixtures, given ranks)" begin
 	# With ranks GIVEN, JIVE is deterministic — no permutation, no RNG — so the
 	# decomposition should match r.jive's saved output pointwise (to cross-language
-	# tol_r). Fixtures from jive.R; skip with a note if they're absent.
+	# tol_r). Fixtures from generate_jive_reference.R; skip with a note if they're absent.
 	refdir = joinpath(@__DIR__, "Data", "JIVE")
 	if !isfile(joinpath(refdir, "X1.csv"))
-		@info "JIVE r.jive fixtures not found; skipping. Run jive.R to create them."
+		@info "JIVE r.jive fixtures not found; skipping. Run generate_jive_reference.R to create them."
 	else
 		# Record the r.jive version that produced the fixtures (results can shift
 		# between package versions, so provenance helps when debugging a mismatch).
@@ -300,7 +300,7 @@ end
 	# the joint SUBSPACE via canonical correlation rather than pointwise.
 	refdir = joinpath(@__DIR__, "Data", "JIVE")
 	if !isfile(joinpath(refdir, "X1s.csv"))
-		@info "JIVE auto-rank fixtures not found; re-run jive.R to create them."
+		@info "JIVE auto-rank fixtures not found; re-run generate_jive_reference.R to create them."
 	else
 		rd(f) = readdlm(joinpath(refdir, f), ',', Float64; skipstart = 1)
 		X1s = rd("X1s.csv");
