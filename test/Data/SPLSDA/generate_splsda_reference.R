@@ -1,6 +1,6 @@
 # generate_splsda_reference.R
 # mixOmics sPLS-DA reference fixtures for the Julia test suite.
-# RUN AS A FILE:  cd Test/Data/SPLSDA && Rscript splsda.R
+# RUN AS A FILE:  cd Test/Data/SPLSDA && Rscript generate_splsda_reference.R
 # Requires: BiocManager::install("mixOmics")
 
 suppressMessages(library(mixOmics))

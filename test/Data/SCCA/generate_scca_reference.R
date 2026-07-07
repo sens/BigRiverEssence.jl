@@ -1,6 +1,6 @@
 # generate_scca_reference.R
 # PMA::CCA (sparse CCA) reference fixtures for the Julia test suite.
-# RUN AS A FILE:  cd Test/Data/SCCA && Rscript scca.R
+# RUN AS A FILE:  cd Test/Data/SCCA && Rscript generate_scca_reference.R
 # Requires: install.packages("PMA")
 
 suppressMessages(library(PMA))

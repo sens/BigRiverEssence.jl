@@ -268,7 +268,7 @@ end
 	# obs-in-rows, scca wants obs-in-columns, so we transpose X and Z before fitting.
 	refdir = joinpath(@__DIR__, "Data", "SCCA")
 	if !isfile(joinpath(refdir, "X.csv"))
-		@info "sCCA PMA fixtures not found; run scca.R to create them."
+		@info "sCCA PMA fixtures not found; run generate_scca_reference.R to create them."
 	else
 		# Record the PMA version behind the fixtures (sparse results can shift between
 		# versions, so provenance helps when debugging a mismatch).

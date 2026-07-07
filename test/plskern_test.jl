@@ -15,15 +15,6 @@
 
 
 
-const HAS_JCHEMO = let
-	try
-		; @eval import Jchemo; true;
-	catch
-		; false;
-	end
-end
-HAS_JCHEMO || @info "Jchemo not available; cross-implementation tests will be skipped."
-
 @testset "output structure & invariants" begin
 	# Basic contract: right type and factor-matrix shapes, the stored centering stats
 	# match the data, and the weight vectors are unit-norm.
@@ -194,45 +185,47 @@ end
 	@test_throws ArgumentError BigRiverEssence.plskern(X, reshape(y, :, 1); nlv = 2, method = :bogus)
 end
 
-@testset "matches Jchemo.plskern (live, if available)" begin
-	# Cross-implementation check against Jchemo (a live Julia PLS package, no R needed).
+@testset "matches Jchemo.plskern (offline fixtures)" begin
+	# Cross-implementation check against Jchemo, using pre-generated CSV fixtures
+	# (see Data/PLSKERN/generate_plskern_reference.jl). No Jchemo import at test time.
 	# Coefficients and predictions have no sign freedom, so they must match directly;
 	# the latent scores carry per-column sign ambiguity, so those compare via |dot|.
-	if !HAS_JCHEMO
-		@test_skip "Jchemo not installed"
-	else
-		Random.seed!(1234)
-		n, p, nlv = 400, 50, 12
-		X = randn(n, p);
-		y = randn(n)
+	datadir = joinpath(@__DIR__, "Data", "PLSKERN")
+	rd(f)   = readdlm(joinpath(datadir, f), ',', Float64)
 
-		m_mine    = BigRiverEssence.plskern(X, reshape(y, :, 1); nlv = nlv, method = :algo1)
-		B_mine, _ = BigRiverEssence.plskerncoef(m_mine)
+	meta = readdlm(joinpath(datadir, "meta.csv"), ',')
+	nlv  = Int(meta[findfirst(==("nlv"), meta[:, 1]), 2])   # read nlv from the fixture
 
-		mod = Jchemo.plskern(; nlv = nlv)               # Jchemo scal=false ↔ our standardize=false
-		Jchemo.fit!(mod, X, y)                          # X, y are the same arrays our fit used —
-		B_jc = Jchemo.coef(mod).B                       # safe, since plskern doesn't modify them
+	# Load the EXACT inputs Jchemo saw, and Jchemo's stored outputs.
+	X         = rd("X.csv")
+	y         = vec(rd("y.csv"))
+	Y         = rd("Y_multi.csv")
+	B_jc      = rd("B.csv")
+	pred_jc   = rd("pred.csv")
+	transf_jc = rd("transf.csv")
+	BY_jc     = rd("B_multi.csv")
 
-		@test maximum(abs.(B_mine .- B_jc)) < tol_julia # B is sign-unambiguous ⇒ direct compare
-		ŷ_mine = vec(BigRiverEssence.plskernpredict(m_mine, X))
-		ŷ_jc   = vec(Jchemo.predict(mod, X).pred)
-		@test maximum(abs.(ŷ_mine .- ŷ_jc)) < tol_julia # predictions also have no sign freedom
-		# Scores match only up to per-column sign — latent factors are sign-ambiguous.
-		T_jc = Jchemo.transf(mod, X)
-		for a in 1:nlv
-			@test abs(dot(m_mine.T[:, a] ./ norm(m_mine.T[:, a]),
-				T_jc[:, a] ./ norm(T_jc[:, a]))) > 1 - tol_julia
-		end
-		# The algo2 path must agree with Jchemo too (both algorithms, same answer).
-		m2 = BigRiverEssence.plskern(X, reshape(y, :, 1); nlv = nlv, method = :algo2)
-		B2, _ = BigRiverEssence.plskerncoef(m2)
-		@test maximum(abs.(B2 .- B_jc)) < tol_julia
-		# And the multi-response case cross-checks against Jchemo as well.
-		Y = randn(n, 3)
-		mYmine = BigRiverEssence.plskern(X, Y; nlv = nlv);
-		BYmine, _ = BigRiverEssence.plskerncoef(mYmine)
-		modY = Jchemo.plskern(; nlv = nlv);
-		Jchemo.fit!(modY, X, Y)
-		@test maximum(abs.(BYmine .- Jchemo.coef(modY).B)) < tol_julia
+	# --- single response: our plskern on the same X, y ---
+	m_mine    = BigRiverEssence.plskern(X, reshape(y, :, 1); nlv = nlv, method = :algo1)
+	B_mine, _ = BigRiverEssence.plskerncoef(m_mine)
+	@test maximum(abs.(B_mine .- B_jc)) < tol_julia          # B is sign-unambiguous ⇒ direct compare
+
+	ŷ_mine = BigRiverEssence.plskernpredict(m_mine, X)       # (N, 1), same shape as pred_jc
+	@test maximum(abs.(ŷ_mine .- pred_jc)) < tol_julia       # predictions also have no sign freedom
+
+	# Scores match only up to per-column sign — latent factors are sign-ambiguous.
+	for a in 1:nlv
+		@test abs(dot(m_mine.T[:, a] ./ norm(m_mine.T[:, a]),
+			transf_jc[:, a] ./ norm(transf_jc[:, a]))) > 1 - tol_julia
 	end
+
+	# --- algo2 path must agree with Jchemo too ---
+	m2 = BigRiverEssence.plskern(X, reshape(y, :, 1); nlv = nlv, method = :algo2)
+	B2, _ = BigRiverEssence.plskerncoef(m2)
+	@test maximum(abs.(B2 .- B_jc)) < tol_julia
+
+	# --- multi-response cross-check ---
+	mYmine = BigRiverEssence.plskern(X, Y; nlv = nlv)
+	BYmine, _ = BigRiverEssence.plskerncoef(mYmine)
+	@test maximum(abs.(BYmine .- BY_jc)) < tol_julia
 end
