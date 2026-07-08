@@ -21,4 +21,5 @@ makedocs(; modules=[BigRiverEssence], sitename="BigRiverEssence.jl", pages=[
 deploydocs(;
     repo = "github.com/BanerjeeAbhisek/BigRiverEssence.jl.git",
     devbranch= "main",
+    devurl = "dev"
 )
