@@ -1,6 +1,6 @@
 # Test/jive_test.jl — tests for jive (JIVE, matching r.jive's orthIndiv variant) and
 # its internals: _jive_rjive_core_opt2 (given-ranks core), _jive_perm_ranks_opt (the
-# permutation rank estimator), and the safe_svd* SVD wrappers.
+# permutation rank estimator), and the _safe_svd* SVD wrappers.
 # Tolerances (tol_ord / tol_julia / tol_r) come from runtests.jl. JIVE adds a fourth,
 # STRUCTURAL kind of tolerance: orthogonality floors (< 1e-4) — see the notes below
 # on why those are deliberately looser than tol_ord.
@@ -199,18 +199,18 @@ end
 # at the source rather than as a confusing symptom in the full decomposition.
 # ----------------------------------------------------------------------------
 
-@testset "internal: safe_svd / safe_svdvals / safe_svd!" begin
-	# The safe_svd* wrappers fall back to a robust algorithm on LAPACK convergence
+@testset "internal: _safe_svd / __safe_svdvals / __safe_svd!" begin
+	# The _safe_svd* wrappers fall back to a robust algorithm on LAPACK convergence
 	# failures, but on normal input they must behave exactly like Base's svd: reproduce
-	# the factorization, and return the same singular values. safe_svd! mutates input.
+	# the factorization, and return the same singular values. __safe_svd! mutates input.
 	Random.seed!(7)
 	A = randn(40, 25)
-	F = BigRiverEssence.safe_svd(A)
+	F = BigRiverEssence._safe_svd(A)
 	@test F.U * Diagonal(F.S) * F.Vt ≈ A                  # factorization reconstructs A
-	@test BigRiverEssence.safe_svdvals(A) ≈ svdvals(A)                          # singular values match Base
+	@test BigRiverEssence.__safe_svdvals(A) ≈ svdvals(A)                          # singular values match Base
 	@test F.S ≈ svdvals(A)
-	Acopy = copy(A)                                       # safe_svd! overwrites its argument,
-	F2 = BigRiverEssence.safe_svd!(Acopy)                                    # so pass a copy to keep A intact
+	Acopy = copy(A)                                       # __safe_svd! overwrites its argument,
+	F2 = BigRiverEssence.__safe_svd!(Acopy)                                    # so pass a copy to keep A intact
 	@test F2.U * Diagonal(F2.S) * F2.Vt ≈ A
 end
 
