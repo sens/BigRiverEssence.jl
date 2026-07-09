@@ -28,7 +28,7 @@ include("cca.jl")
 export CcaStructure, cca, cca_transform
 
 include("scca.jl")
-export SCcaStructure, scca
+export SccaStructure, scca
 
 
 
