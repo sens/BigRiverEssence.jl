@@ -80,7 +80,7 @@ If you have questions about contributing or using `BigRiverEssence` package, ple
 
 [^5]: Lock, E. F., Hoadley, K. A., Marron, J. S., & Nobel, A. B. (2013). *Joint and Individual Variation Explained (JIVE) for Integrated Analysis of Multiple Data Types*. Annals of Applied Statistics, 7(1), 523–542.
 
-[^6] Pérez-Enciso, M., Tenenhaus, M. Prediction of clinical outcome with microarray data: a partial least squares discriminant analysis (PLS-DA) approach. Hum Genet 112, 581–592 (2003). https://doi.org/10.1007/s00439-003-0921-9
+[^6]: Pérez-Enciso, M., Tenenhaus, M. Prediction of clinical outcome with microarray data: a partial least squares discriminant analysis (PLS-DA) approach. Hum Genet 112, 581–592 (2003). https://doi.org/10.1007/s00439-003-0921-9
 
 [^7]: Lê Cao, K.-A., Boitard, S., & Besse, P. (2011). *Sparse PLS Discriminant Analysis: Biologically Relevant Feature Selection and Graphical Displays for Multiclass Problems*. BMC Bioinformatics, 12, 253. 
 
