@@ -311,7 +311,7 @@ function _jive_perm_ranks_opt(Xc::Vector{Matrix{Float64}}, n::Int;
 		#  joint rank: compare actual SVs of the stacked (data − individual)
 		#     against a column-permuted null (permuting breaks shared structure) 
 		full = [Xc[i] .- Aperp[i] for i in 1:k]
-		actual = __safe_svdvals(reduce(vcat, full))
+		actual = _safe_svdvals(reduce(vcat, full))
 		nsv = min(n, ptot)
 		perms = zeros(nperm, nsv)
 		rowr = (
@@ -330,7 +330,7 @@ function _jive_perm_ranks_opt(Xc::Vector{Matrix{Float64}}, n::Int;
 				randperm!(permcols)                          # permute each block's columns independently
 				@views fullstack[rowr[i], :] .= full[i][:, permcols]
 			end
-			sv = __safe_svdvals(fullstack)
+			sv = _safe_svdvals(fullstack)
 			m = min(length(sv), nsv)
 			@views perms[p, 1:m] .= sv[1:m]
 		end
@@ -344,7 +344,7 @@ function _jive_perm_ranks_opt(Xc::Vector{Matrix{Float64}}, n::Int;
 		for i in 1:k
 			ind = Xc[i] .- Jperp[i]
 			pi_ = size(ind, 1)
-			actual_i = __safe_svdvals(ind)
+			actual_i = _safe_svdvals(ind)
 			nsv_i = min(n, pi_)
 			perms_i = zeros(nperm, nsv_i)
 			permbuf = Matrix{Float64}(undef, pi_, n)
@@ -353,7 +353,7 @@ function _jive_perm_ranks_opt(Xc::Vector{Matrix{Float64}}, n::Int;
 					randperm!(permcols)                      # permute within each row
 					@views permbuf[row, :] .= ind[row, permcols]
 				end
-				sv = __safe_svdvals(permbuf)
+				sv = _safe_svdvals(permbuf)
 				m = min(length(sv), nsv_i)
 				@views perms_i[p, 1:m] .= sv[1:m]
 			end

@@ -199,7 +199,7 @@ end
 # at the source rather than as a confusing symptom in the full decomposition.
 # ----------------------------------------------------------------------------
 
-@testset "internal: _safe_svd / __safe_svdvals / _safe_svd!" begin
+@testset "internal: _safe_svd / _safe_svdvals / _safe_svd!" begin
 	# The _safe_svd* wrappers fall back to a robust algorithm on LAPACK convergence
 	# failures, but on normal input they must behave exactly like Base's svd: reproduce
 	# the factorization, and return the same singular values. _safe_svd! mutates input.
